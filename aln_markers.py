@@ -69,6 +69,13 @@ def main():
     )
 
     parser.add_argument(
+        "-t", "--threads",
+        type=int,
+        default=1,
+        help="Number of threads to use for HMMER searches (default: 1)"
+    )
+
+    parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -158,17 +165,21 @@ def main():
         # --- Perform searches for each HMM ---
         logger.info("Performing HMM searches for each model...")
         concatenated_hits = ""
+        total_hmm_length = 0
         for i, hmm in enumerate(hmms):
             # Decode HMM name from bytes to string for display purposes.
             # Use a fallback name if HMM name is not available.
             hmm_name = hmm.name.decode() if hmm.name else f"unnamed_HMM_{i+1}"
+            hmm_length = hmm.M
+            total_hmm_length += hmm_length
 
             # Search current hmm against all sequences
-            hits = next(pyhmmer.hmmsearch(hmm, sequences, bit_cutoffs="trusted", cpus=5))
+            hits = next(pyhmmer.hmmsearch(hmm, sequences, bit_cutoffs="trusted", 
+                                          cpus=args.threads, parallel='targets'))
 
             if len(hits) < 1:
                 # No matches - output a string of hyphens
-                current_hit = "-" * hmm.consensus_length
+                current_hit = "-" * hmm_length
             else:
                 # Obtain hit with the best score
                 argmax, best_hit = max(enumerate(hits), key=lambda x: x[1].score)
@@ -186,7 +197,7 @@ def main():
                 current_hit = re.sub(r'[a-z]', '', aln.alignment[0])
 
                 # Validate alignment length
-                if len(current_hit) != best_hit.best_domain.alignment.hmm_length:
+                if len(current_hit) != hmm_length:
                     logger.error("Alignment length does not match HMM length!!!")
                     sys.exit(1)
 
@@ -199,6 +210,9 @@ def main():
 
         # Output concatenated alignments, if requested
         if args.concatenate:
+            if total_hmm_length != len(concatenated_hits):
+                logger.error("Alignment length does not match HMM length!!!")
+                sys.exit(1)
             print(f">{output_header_prefix}")
             print(concatenated_hits)
 
